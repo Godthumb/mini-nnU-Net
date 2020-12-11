@@ -148,7 +148,7 @@ class DatasetAnalyzer(object):
 if __name__ == '__main__':
     # give it class_label & cropped_out_dir
     class_label_dict = {"0": "background", "1": "infection"}
-    cropped_out_dir = './preprocessed/foreground'
+    cropped_out_dir = 'D:/preprocessed_COVID19/crop_foreground'
     data_analyzer = DatasetAnalyzer(cropped_out_dir)
     dataset_properties = data_analyzer.analyze_dataset(class_label_dict, collect_intensityproperties=True)
 

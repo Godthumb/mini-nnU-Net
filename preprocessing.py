@@ -143,6 +143,7 @@ def resample_patient(data, seg, original_spacing, target_spacing, order_data=3, 
     :return:
     """
     assert not ((data is None) and (seg is None))
+
     if data is not None:
         assert len(data.shape) == 4, "data must be c z y x"
     if seg is not None:
@@ -170,35 +171,40 @@ def resample_patient(data, seg, original_spacing, target_spacing, order_data=3, 
     # resample img
     data_reshaped = resample_data_or_seg(data, new_shape, False, axis, order_data, do_separate_z, cval=cval_data,
                                          order_z=order_z_data)
-
     # resample seg
     seg_reshaped = resample_data_or_seg(seg, new_shape, True, axis, order_seg, do_separate_z, cval=cval_seg,
                                         order_z=order_z_seg)
-
     return data_reshaped, seg_reshaped
 
 class GenericPreprocessor(object):
-    def __init__(self, folder_with_cropped_data, out_dir, intensityproperties=None, num_thread=4):
+    def __init__(self, folder_with_cropped_data, out_dir, num_thread=4):
         # self.transpose_forward = transpose_forward
-        self.intensityproperties = intensityproperties
+
         self.resample_separate_z_anisotropy_threshold = 3
         self.out_dir = out_dir
         # self.use_nonzero_mask = False # False in CT data
         # get data pickle
         self.folder_with_cropped_data = folder_with_cropped_data
+        self.intensityproperties = self.load_dataset_properties(folder_with_cropped_data)
         self.dataset_properties = load_pickle(join(self.folder_with_cropped_data, "dataset_properties.pkl"))
         self.target_spacing_percentile = 50
         self.num_thread = num_thread
 
     @staticmethod
     def load_cropped(cropped_output_dir, case_identifier):
-        all_data = np.load(os.path.join(cropped_output_dir, "%s.npy" % case_identifier))
+        all_data = np.load(join(cropped_output_dir, "%s.npy" % case_identifier))
         data = all_data[:-1].astype(np.float32) # (1, 234, 512, 512)
         seg = all_data[-1:]  # (1, 234, 512, 512)
-        with open(os.path.join(cropped_output_dir, "%s.pkl" % case_identifier), 'rb') as f:
+        with open(join(cropped_output_dir, "%s.pkl" % case_identifier), 'rb') as f:
             properties = pickle.load(f)
         return data, seg, properties
 
+    @staticmethod
+    def load_dataset_properties(cropped_output_dir):
+        with open(join(cropped_output_dir, 'dataset_properties.pkl'), 'rb') as f:
+            dataset_properties = pickle.load(f)
+
+        return dataset_properties['intensityproperties']
 
     def get_spacings(self):
         spacings = self.dataset_properties['all_spacings']
@@ -251,7 +257,6 @@ class GenericPreprocessor(object):
 
         # remove nans
         data[np.isnan(data)] = 0
-
         # skimage.transform.resize()
         # The order of interpolation. The order has to be in the range 0-5:
         # 0: Nearest-neighbor
@@ -279,10 +284,11 @@ class GenericPreprocessor(object):
         # use_nonzero_mask = self.use_nonzero_mask
         #
         # CT normalization
-        mean_intensity = self.intensityproperties[0]['mean']
-        std_intensity = self.intensityproperties[0]['sd']
-        lower_bound = self.intensityproperties[0]['percentile_00_5']
-        upper_bound = self.intensityproperties[0]['percentile_99_5']
+        mean_intensity = self.intensityproperties['mean']
+        std_intensity = self.intensityproperties['sd']
+        lower_bound = self.intensityproperties['percentile_00_5']
+        upper_bound = self.intensityproperties['percentile_99_5']
+        # print(mean_intensity, std_intensity, lower_bound, upper_bound)
         # truncation by percentile_00_5 and percentile_99_5
         data[0] = np.clip(data[0], lower_bound, upper_bound)
         # z-score (img - mean) / std
@@ -291,7 +297,7 @@ class GenericPreprocessor(object):
         #      data[0][seg[-1] < 0] = 0
         all_data = np.vstack((data, seg)).astype(np.float32)
         # return data, seg, properties
-        np.save(join(self.out_dir, "%s" % case_identifier) + '.npy', data=all_data)
+        np.save(join(self.out_dir, "%s" % case_identifier) + '.npy', all_data)
         with open(join(self.out_dir, "%s.pkl" % case_identifier), 'wb') as f:
             pickle.dump(properties, f)
 
@@ -301,17 +307,21 @@ class GenericPreprocessor(object):
         list_of_cropped_files = subfiles(self.folder_with_cropped_data, None, '.npy', True)
         all_args = []
         for j, case in enumerate(list_of_cropped_files):
-            case_identifier = get_case_identifier(case)  # fi
+            case_identifier = get_case_identifier(case)
             data, seg, property = self.load_cropped(self.folder_with_cropped_data, case_identifier)
-            args = data, target_spacings, property, seg
+            args = data, target_spacings, property, case_identifier, seg
             all_args.append(args)
 
         p = Pool(self.num_thread)
         p.starmap(self.resample_and_normalize, all_args)
         p.close()
         p.join()
+        # for arg in all_args:
+        #     self.resample_and_normalize(*arg)
 
 if __name__ == '__main__':
-    processer = GenericPreprocessor(r'./preprocessed/foreground', './preprocessing/resample_normalization')
-    print(processer.run())
+    processer = GenericPreprocessor('D:/preprocessed_COVID19/crop_foreground',
+                                    'D:/preprocessed_COVID19/resample_normalization',
+                                    )
+    processer.run()
 
