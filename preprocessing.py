@@ -290,6 +290,7 @@ class GenericPreprocessor(object):
         upper_bound = self.intensityproperties['percentile_99_5']
         # print(mean_intensity, std_intensity, lower_bound, upper_bound)
         # truncation by percentile_00_5 and percentile_99_5
+        print('clip with lower bound %s, upper bound %s' %(lower_bound, upper_bound))
         data[0] = np.clip(data[0], lower_bound, upper_bound)
         # z-score (img - mean) / std
         data[0] = (data[0] - mean_intensity) / std_intensity

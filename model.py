@@ -146,6 +146,7 @@ class UpsamplingDeconvBlock(nn.Module):
 class VNet(nn.Module):
     def __init__(self, n_channels=1, n_classes=2, n_filters=16, normalization='none', has_dropout=False):
         super(VNet, self).__init__()
+        self.n_classes = n_classes
         self.has_dropout = has_dropout
         ##############################Downsampling phase######################################
         self.block_one = ConvBlock(1, n_channels, n_filters, normalization=normalization)
@@ -208,15 +209,16 @@ class VNet(nn.Module):
         x3 = features[2]
         x4 = features[3]
         x5 = features[4]
+        deep_supervise_layers = []
 
         x5_up = self.block_five_up(x5)
         x5_up = x5_up + x4  # element-wise add
 
-        x6 = self.block_six(x5_up)
+        x6 = self.block_six(x5_up) # deep supervison layer1
         x6_up = self.block_six_up(x6)
         x6_up = x6_up + x3
 
-        x7 = self.block_seven(x6_up)
+        x7 = self.block_seven(x6_up)  # deep supervison layer2
         x7_up = self.block_seven_up(x7)
         x7_up = x7_up + x2
 
@@ -228,14 +230,23 @@ class VNet(nn.Module):
 
         if self.has_dropout:
             x9 = self.dropout(x9)
-        out = self.out_conv(x9)
-        return out
+        out = self.out_conv(x9)  # deep superviosn layer3
+        res = [x6, x7, x8, out]
+        return res
 
     def forward(self, input, turnoff_drop=False):
         if turnoff_drop:
             self.has_dropout = turnoff_drop
         features = self.encoder(input)
-        out = self.decoder(features)
+        seg_layers = self.decoder(features)
+        def upsamping_seg_conv(factor_ref_input_seg, n_in_filter):
+            seg_op = []
+            seg_op.append(nn.Conv3d(n_in_filter, self.n_classes, 1, 1, 0, 1, 1, False)) # 1x1x1 conv3d
+            seg_op.append(nn.Upsample(scale_factor=factor_ref_input_seg, mode='trilinear', align_corners=False))
+            conv = nn.Sequential(*seg_op)
+            return conv
+        out = [upsamping_seg_conv(input.shape[-1] / seg_layer.shape[-1],
+                                  seg_layer.shape[1])(seg_layer) for seg_layer in seg_layers]
         # if turnoff_drop:
         #     self.has_dropout = has_dropout
         return out
@@ -252,4 +263,4 @@ if __name__ == '__main__':
     model = VNet(normalization='instancenorm')
     inp = torch.randn(1, 1, 128, 128, 128)
     out = model(inp)
-    print(out.shape)
+    print([o.shape for o in out])
