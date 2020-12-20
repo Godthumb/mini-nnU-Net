@@ -9,7 +9,7 @@ class COVID(Dataset):
         assert mode == 'train' or mode == 'val'
         self.base_dir = base_dir
         self.resample_data_file_list = subfiles(self.base_dir, None, '.npy', False) # npy files
-        print(self.resample_data_file_list)
+        # print(self.resample_data_file_list)
         self.patch_size = patch_size
         # self.batch_size = batch_size
         # self.oversample_foreground_percent = oversample_foreground_percent
@@ -21,7 +21,7 @@ class COVID(Dataset):
         case_identifier = self.get_case_identifier(this_case)
         data, seg, properties = self.load_all_data(case_identifier) # # (1, 234, 512, 512)
         case_all_data = np.concatenate([data, seg], axis=0)
-        print(case_all_data.shape)
+        # print(case_all_data.shape)
         # if foreground pixel exist, use choosed foreground pixel random sample slice
         foreground_classes = np.array(
             [i for i in properties['class_locations'].keys() if len(properties['class_locations'][i]) != 0])
@@ -48,7 +48,7 @@ class COVID(Dataset):
             bbox_z_lb = np.random.randint(lb_z, ub_z + 1)
         else:
             selected_voxel = voxels_of_that_class[np.random.choice(len(voxels_of_that_class))]
-            print(selected_voxel)
+            # print(selected_voxel)
             bbox_x_lb = max(lb_x, selected_voxel[2] - self.patch_size[2] // 2)
             bbox_y_lb = max(lb_y, selected_voxel[1] - self.patch_size[1] // 2)
             bbox_z_lb = max(lb_z, selected_voxel[0] - self.patch_size[0] // 2)
@@ -79,7 +79,7 @@ class COVID(Dataset):
                                                  (-min(0, bbox_z_lb), max(bbox_z_ub - shape[0], 0)),
                                                  (-min(0, bbox_y_lb), max(bbox_y_ub - shape[1], 0)),
                                                  (-min(0, bbox_x_lb), max(bbox_x_ub - shape[2], 0))),
-                           mode='constant', constant_values=-1 )
+                           mode='constant', constant_values=0)
         
         # do_augmentation while training phase
         if self.mode == 'train':
@@ -127,7 +127,7 @@ class COVID(Dataset):
 
 if __name__ == '__main__':
     import SimpleITK as sitk
-    dataset = COVID(r'D:/preprocessed_COVID19/resample_normalization', (128, 128, 128), 2)
+    dataset = COVID(r'D:/preprocessed_COVID19/resample_normalization', (128, 128, 128))
     img, seg = dataset.__getitem__(0)
     print(img.shape)
     print(seg.shape)

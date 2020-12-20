@@ -1,2 +1,0 @@
-[14:43:46.239] Namespace(base_lr=0.01, batch_size=2, exp='vnet_deep_supervised', gpu=[0], max_epoch=100, root_dir='D:/preprocessed_COVID19/resample_normalization')
-[14:44:17.913] Namespace(base_lr=0.01, batch_size=2, exp='vnet_deep_supervised', gpu=[0], max_epoch=100, root_dir='D:/preprocessed_COVID19/resample_normalization')

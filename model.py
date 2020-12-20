@@ -143,8 +143,36 @@ class UpsamplingDeconvBlock(nn.Module):
         x = self.conv(x)
         return x
 
+
+# def upsamping_seg_conv(self, factor_ref_input_seg, n_in_filter):
+#     seg_op = []
+#     seg_op.append(nn.Conv3d(n_in_filter, self.n_classes, 1, 1, 0, 1, 1, False))  # 1x1x1 conv3d
+#     seg_op.append(nn.Upsample(scale_factor=factor_ref_input_seg, mode='trilinear', align_corners=False))
+#     conv = nn.Sequential(*seg_op)
+#     return nn.ModuleList(conv)
+
+class Upsampling_seg_conv(nn.Module):
+    def __init__(self, n_downsampling=4, n_filters=16, n_classes=2):
+        super(Upsampling_seg_conv, self).__init__()
+        self.ops = []
+        for i in range(n_downsampling)[::-1]:  # [3, 2, 1, 0]
+            # print(i)
+            if i == 0:  # last layer dont't do upsampling
+                continue
+            seg_op = []
+            # 128 -> 2
+            seg_op.append(nn.Conv3d(n_filters * (2 ** i), n_classes, 1, 1, 0, 1, 1, False))  # 1x1x1 conv3d
+            seg_op.append(nn.Upsample(scale_factor=2**i, mode='trilinear', align_corners=False))
+            self.ops.append(nn.Sequential(*seg_op))
+
+        self.ops = nn.ModuleList(self.ops)
+    def forward(self, seg_features):
+        x = [op(seg_feature) for op, seg_feature in zip(self.ops, seg_features)]
+        return x
+
 class VNet(nn.Module):
-    def __init__(self, n_channels=1, n_classes=2, n_filters=16, normalization='none', has_dropout=False):
+    def __init__(self, n_channels=1, n_classes=2, n_filters=16,
+                 normalization='none', has_dropout=False, n_downsampling=4):
         super(VNet, self).__init__()
         self.n_classes = n_classes
         self.has_dropout = has_dropout
@@ -180,7 +208,9 @@ class VNet(nn.Module):
         self.out_conv = nn.Conv3d(n_filters, n_classes, 1, padding=0)
 
         self.dropout = nn.Dropout3d(p=0.5, inplace=False)
-        self.weight_init = self.__init_weight()
+        self.upsampling_seg_conv = Upsampling_seg_conv(n_downsampling=n_downsampling,
+                                                       n_filters=n_filters, n_classes=n_classes)
+        self.__init_weight()
 
     def encoder(self, input):
         x1 = self.block_one(input)
@@ -239,16 +269,7 @@ class VNet(nn.Module):
             self.has_dropout = turnoff_drop
         features = self.encoder(input)
         seg_layers = self.decoder(features)
-        def upsamping_seg_conv(factor_ref_input_seg, n_in_filter):
-            seg_op = []
-            seg_op.append(nn.Conv3d(n_in_filter, self.n_classes, 1, 1, 0, 1, 1, False)) # 1x1x1 conv3d
-            seg_op.append(nn.Upsample(scale_factor=factor_ref_input_seg, mode='trilinear', align_corners=False))
-            conv = nn.Sequential(*seg_op)
-            return conv
-        out = [upsamping_seg_conv(input.shape[-1] / seg_layer.shape[-1],
-                                  seg_layer.shape[1])(seg_layer) for seg_layer in seg_layers]
-        # if turnoff_drop:
-        #     self.has_dropout = has_dropout
+        out = self.upsampling_seg_conv(seg_layers[:-1]) + seg_layers[-1:]
         return out
 
     def __init_weight(self):
@@ -260,7 +281,7 @@ class VNet(nn.Module):
                 m.bias.data.zero_()
 
 if __name__ == '__main__':
-    model = VNet(normalization='instancenorm')
-    inp = torch.randn(1, 1, 128, 128, 128)
+    model = VNet(normalization='instancenorm').cuda()
+    inp = torch.randn(1, 1, 128, 128, 128).cuda()
     out = model(inp)
     print([o.shape for o in out])
