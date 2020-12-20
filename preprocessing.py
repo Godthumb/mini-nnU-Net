@@ -177,7 +177,7 @@ def resample_patient(data, seg, original_spacing, target_spacing, order_data=3, 
     return data_reshaped, seg_reshaped
 
 class GenericPreprocessor(object):
-    def __init__(self, folder_with_cropped_data, out_dir, num_thread=4):
+    def __init__(self, folder_with_cropped_data, out_dir, num_thread=2):
         # self.transpose_forward = transpose_forward
 
         self.resample_separate_z_anisotropy_threshold = 3
@@ -239,7 +239,7 @@ class GenericPreprocessor(object):
             target[worst_spacing_axis] = target_spacing_of_that_axis
         return target
 
-    def resample_and_normalize(self, data, target_spacing, properties, case_identifier, seg=None):
+    def resample_and_normalize(self, data, target_spacing, all_classes, properties, case_identifier, seg=None):
         """
         data and seg must already have been transposed by transpose_forward. properties are the un-transposed values
         (spacing etc)
@@ -277,7 +277,7 @@ class GenericPreprocessor(object):
         print("before:", before, "\nafter: ", after, "\n")
 
         if seg is not None:  # hippocampus 243 has one voxel with -2 as label. wtf?
-            seg[seg < -1] = 0
+            seg[seg < 0] = 0
 
         properties["size_after_resampling"] = data[0].shape
         properties["spacing_after_resampling"] = target_spacing
@@ -297,6 +297,23 @@ class GenericPreprocessor(object):
         # if use_nonzero_mask[0]:
         #      data[0][seg[-1] < 0] = 0
         all_data = np.vstack((data, seg)).astype(np.float32)
+        num_samples = 10000
+        min_percent_coverage = 0.01  # at least 1% of the class voxels need to be selected, otherwise it may be too sparse
+        rndst = np.random.RandomState(1234)
+        class_locs = {}
+        for c in all_classes:
+            all_locs = np.argwhere(all_data[-1] == c)
+            if len(all_locs) == 0:
+                class_locs[c] = []
+                continue
+            target_num_samples = min(num_samples, len(all_locs))
+            target_num_samples = max(target_num_samples, int(np.ceil(len(all_locs) * min_percent_coverage)))
+
+            selected = all_locs[rndst.choice(len(all_locs), target_num_samples, replace=False)]
+            class_locs[c] = selected
+            print(c, target_num_samples)
+        properties['class_locations'] = class_locs
+
         # return data, seg, properties
         np.save(join(self.out_dir, "%s" % case_identifier) + '.npy', all_data)
         with open(join(self.out_dir, "%s.pkl" % case_identifier), 'wb') as f:
@@ -304,13 +321,15 @@ class GenericPreprocessor(object):
 
     def run(self):
         target_spacings = self.get_spacings()
+        all_classes = self.dataset_properties['all_classes']
+        print(all_classes)
         # get all npy files is a list
         list_of_cropped_files = subfiles(self.folder_with_cropped_data, None, '.npy', True)
         all_args = []
         for j, case in enumerate(list_of_cropped_files):
             case_identifier = get_case_identifier(case)
             data, seg, property = self.load_cropped(self.folder_with_cropped_data, case_identifier)
-            args = data, target_spacings, property, case_identifier, seg
+            args = data, target_spacings, all_classes, property, case_identifier, seg
             all_args.append(args)
 
         p = Pool(self.num_thread)
