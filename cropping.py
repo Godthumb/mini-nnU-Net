@@ -156,6 +156,6 @@ class ImageCropper(object):
         p.join()
 
 if __name__ == '__main__':
-    imgcropper = ImageCropper(4, 'D:/preprocessed_COVID19/crop_foreground')
-    list_of_files = create_lists('D:/COVID/imagesTr')
+    imgcropper = ImageCropper(4, 'D:/COVID-19-20/preprocessed_COVID19/crop_foreground')
+    list_of_files = create_lists('D:/COVID-19-20/data/imagesTr')
     imgcropper.run_cropping(list_of_files)

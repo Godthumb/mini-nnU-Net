@@ -7,12 +7,9 @@ class COVID(Dataset):
     def __init__(self, base_dir, patch_size, mode='train', aug_dict=None):
         super(COVID, self).__init__()
         assert mode == 'train' or mode == 'val'
-        self.base_dir = base_dir
+        self.base_dir = join(base_dir, mode)
         self.resample_data_file_list = subfiles(self.base_dir, None, '.npy', False) # npy files
-        # print(self.resample_data_file_list)
         self.patch_size = patch_size
-        # self.batch_size = batch_size
-        # self.oversample_foreground_percent = oversample_foreground_percent
         self.mode = mode
         self.aug_dict = aug_dict
 
@@ -21,7 +18,6 @@ class COVID(Dataset):
         case_identifier = self.get_case_identifier(this_case)
         data, seg, properties = self.load_all_data(case_identifier) # # (1, 234, 512, 512)
         case_all_data = np.concatenate([data, seg], axis=0)
-        # print(case_all_data.shape)
         # if foreground pixel exist, use choosed foreground pixel random sample slice
         foreground_classes = np.array(
             [i for i in properties['class_locations'].keys() if len(properties['class_locations'][i]) != 0])
@@ -84,7 +80,7 @@ class COVID(Dataset):
         # do_augmentation while training phase
         if self.mode == 'train':
             patch_data, patch_seg = self.do_augment(patch_data, patch_seg, **self.aug_dict)
-        return patch_data, patch_seg
+        return {'image': patch_data, 'label': patch_seg}
 
     def do_augment(self, patch_data, patch_seg, do_flip=True, do_swap=True):
         if do_flip:
@@ -126,18 +122,23 @@ class COVID(Dataset):
         return len(self.resample_data_file_list)
 
 
-
-
 if __name__ == '__main__':
     import SimpleITK as sitk
-    dataset = COVID(r'D:/preprocessed_COVID19/resample_normalization', (128, 128, 128))
-    img, seg = dataset.__getitem__(0)
-    print(img.shape)
-    print(seg.shape)
-    img, seg = dataset.do_augment(img, seg, **{'do_flip': True, 'do_swap': False})
-    img = sitk.GetImageFromArray(img[0])
-    img.SetSpacing(np.array([2.2, 0.8287265, 0.8287265])[::-1])
-    seg = sitk.GetImageFromArray(seg[0])
-    seg.SetSpacing(np.array([2.2, 0.8287265, 0.8287265])[::-1])
-    sitk.WriteImage(img, './aug_img.nii.gz')
-    sitk.WriteImage(seg, './aug_seg.nii.gz')
+    from torch.utils.data import DataLoader
+    dataset = COVID(r'D:\COVID-19-20\preprocessed_COVID19', (64, 128, 128), 'train', {'do_flip': True, 'do_swap': False})
+    # img, seg = dataset.__getitem__(0)
+    # print(img.shape)
+    # print(seg.shape)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=0)
+    from file_and_folder_operations import *
+    # img, seg = dataset.do_augment(img, seg, )
+    target_spacing = load_pickle(r'D:\COVID-19-20\preprocessed_COVID19\crop_foreground\dataset_properties.pkl')['target_spacing']
+    for i, sample_data in enumerate(dataloader):
+        img, seg = sample_data['image'], sample_data['label']
+        print(img.shape)
+        img = sitk.GetImageFromArray(img[0, 0, ...])
+        img.SetSpacing(np.array(target_spacing)[::-1])
+        seg = sitk.GetImageFromArray(seg[0, 0, ...])
+        seg.SetSpacing(np.array(target_spacing)[::-1])
+        sitk.WriteImage(img, './aug_img_%s.nii.gz' % str(i))
+        sitk.WriteImage(seg, './aug_seg_%s.nii.gz' % str(i))

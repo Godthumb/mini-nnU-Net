@@ -323,6 +323,9 @@ class GenericPreprocessor(object):
         target_spacings = self.get_spacings()
         all_classes = self.dataset_properties['all_classes']
         print(all_classes)
+        self.dataset_properties['target_spacing'] = target_spacings
+        with open(join(self.folder_with_cropped_data, 'dataset_properties.pkl'), 'wb') as f:
+            pickle.dump(self.dataset_properties, f)
         # get all npy files is a list
         list_of_cropped_files = subfiles(self.folder_with_cropped_data, None, '.npy', True)
         all_args = []
@@ -331,7 +334,6 @@ class GenericPreprocessor(object):
             data, seg, property = self.load_cropped(self.folder_with_cropped_data, case_identifier)
             args = data, target_spacings, all_classes, property, case_identifier, seg
             all_args.append(args)
-
         p = Pool(self.num_thread)
         p.starmap(self.resample_and_normalize, all_args)
         p.close()
@@ -340,8 +342,8 @@ class GenericPreprocessor(object):
         #     self.resample_and_normalize(*arg)
 
 if __name__ == '__main__':
-    processer = GenericPreprocessor('D:/preprocessed_COVID19/crop_foreground',
-                                    'D:/preprocessed_COVID19/resample_normalization',
+    processer = GenericPreprocessor('D:/COVID-19-20/preprocessed_COVID19/crop_foreground',
+                                    'D:/COVID-19-20/preprocessed_COVID19/resample_normalization',
                                     )
     processer.run()
 

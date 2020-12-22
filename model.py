@@ -210,7 +210,7 @@ class VNet(nn.Module):
         self.dropout = nn.Dropout3d(p=0.5, inplace=False)
         self.upsampling_seg_conv = Upsampling_seg_conv(n_downsampling=n_downsampling,
                                                        n_filters=n_filters, n_classes=n_classes)
-        self.__init_weight()
+        # self.__init_weight()
 
     def encoder(self, input):
         x1 = self.block_one(input)
@@ -239,7 +239,6 @@ class VNet(nn.Module):
         x3 = features[2]
         x4 = features[3]
         x5 = features[4]
-        deep_supervise_layers = []
 
         x5_up = self.block_five_up(x5)
         x5_up = x5_up + x4  # element-wise add
@@ -264,9 +263,9 @@ class VNet(nn.Module):
         res = [x6, x7, x8, out]
         return res
 
-    def forward(self, input, turnoff_drop=False):
+    def forward(self, input, turnoff_drop=True):
         if turnoff_drop:
-            self.has_dropout = turnoff_drop
+            self.has_dropout = False
         features = self.encoder(input)
         seg_layers = self.decoder(features)
         out = self.upsampling_seg_conv(seg_layers[:-1]) + seg_layers[-1:]
