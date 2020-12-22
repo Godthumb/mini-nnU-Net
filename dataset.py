@@ -101,9 +101,12 @@ class COVID(Dataset):
 
         return patch_data, patch_seg
 
-    # def get_do_oversample(self, idx):
-    #     # 2 * (1- 0.33) = round(2 * 0.67) = 1
-    #     return not idx < round(self.batch_size * (1 - self.oversample_foreground_percent))
+    def get_do_oversample(self, p):  # 0.67
+        # 2 * (1- 0.33) = round(2 * 0.67) = 1
+        if np.random.uniform(0, 1) < p:
+            return True
+        else:
+            return False
 
     def get_case_identifier(self, case):
         case_identifier = case.split('\\')[-1][:-4]
