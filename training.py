@@ -9,13 +9,11 @@ from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 import torch.optim as optim
 from tqdm import tqdm
-import time
 from losses import DC_and_CE_loss
 import numpy as np
 from losses import MultipleOutputLoss2
 # from predict import calculate_metric_percase
 import medpy.metric as metric
-import SimpleITK as sitk
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--root_dir', type=str, default=r'D:\COVID-19-20\preprocessed_COVID19',
@@ -24,21 +22,23 @@ parser.add_argument('--base_lr', type=float, default=0.01, help='initial lr')
 parser.add_argument('--max_iterations', type=int,  default=50000, help='maximum epoch number to train')
 parser.add_argument('--batch_size', type=int, default=2, help='batch_size per gpu')
 parser.add_argument('--gpus', type=str, default='0', help='gpu to use')
-parser.add_argument('--exp', type=str,  default='vnet_deep_supervised', help='model_name')
+parser.add_argument('--exp', type=str,  default='vnet_deep_supervised_COVID', help='model_name')
 parser.add_argument('--patch_size', type=tuple, default=(64, 128, 128), help='patch_size')
 parser.add_argument('--n_classes', type=int, default=2, help='seg classes')
 parser.add_argument('--num_workers', type=int, default=4, help='how many thread used in Dataloader')
-parser.add_argument('--has_deepsurpervised', type=bool, default=False, help='use deepsurpervised in highres layers')
+parser.add_argument('--has_deepsurpervised', type=bool, default=True, help='use deepsurpervised in highres layers')
 args = parser.parse_args()
 
 snapshot_path = './snap_shot/' + args.exp
 batch_size = args.batch_size * len(args.gpus.split(','))
-aug_dict = {'do_flip': True, 'do_swap': False}
+aug_dict = {'do_flip': True, 'do_swap': True}
 
 def calculate_metric_percase(pred, gt):
     dice = metric.binary.dc(pred, gt)
     jc = metric.binary.jc(pred, gt)
-    return dice, jc
+    hd = metric.binary.hd95(pred, gt)
+    asd = metric.binary.asd(pred, gt)
+    return dice, jc, hd, asd
 
 def main():
     # make dir for snap_shot
@@ -86,7 +86,7 @@ def main():
     loss_weights = weights / weights.sum()
     print(loss_weights)
     # dc_ce_loss
-    dc_ce_loss = DC_and_CE_loss(smooth=1e-5, classes=args.n_classes, weight_ce=0, weight_dice=1)
+    dc_ce_loss = DC_and_CE_loss(smooth=1e-5, classes=args.n_classes, weight_ce=1, weight_dice=1, ignore_classes_index=0)
     deep_supervised_loss = MultipleOutputLoss2(dc_ce_loss, loss_weights[::-1])
     iter_num = 0
     max_epoch = args.max_iterations // len(train_dataloader) + 1
@@ -148,12 +148,15 @@ def main():
             with torch.no_grad():
                 for sample_data in val_dataloader:
                     img = sample_data['image'].cuda()
-                    seg = sample_data['label'].numpy()
+                    seg = sample_data['label'].numpy()[:, 0]
                     output = model(img)[-1].cpu().numpy()
                     output = np.argmax(output, axis=1)  # (b, 64, 128, 128)
+                    assert output.shape == seg.shape
                     total_metric += np.asarray(calculate_metric_percase(output, seg))
             avg_metric = total_metric / (len(val_dataloader) * args.batch_size)
-            logging.info('dice: {}, jc: {}'.format(avg_metric[0], avg_metric[1]))
+            logging.info('dice: {}, jc: {}, hd95: {}, asd: {}'.format(avg_metric[0], avg_metric[1],
+                                                                      avg_metric[2],
+                                                                      avg_metric[3]))
             # change back to train model
             model.train()
 

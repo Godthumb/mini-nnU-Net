@@ -5,7 +5,6 @@ import torch
 import numpy as np
 import math
 import torch.nn.functional as F
-# from collections import defaultdict
 from medpy import metric
 import SimpleITK as sitk
 import pandas as pd

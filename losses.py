@@ -2,12 +2,34 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 
-class SoftDiceLoss(nn.Module):
-    def __init__(self, smooth=1e-5, classes=3):
+class SoftBinaryDiceLoss(nn.Module):
+    def __init__(self, smooth=1e-5):
+        super(SoftBinaryDiceLoss, self).__init__()
+        self.smooth = smooth
 
-        super(SoftDiceLoss, self).__init__()
+    def forward(self, pred, target):
+        '''
+        :param pred:  (b, d, h, w)
+        :param target: original_seg_arr (b, d, h, w)
+        :return:
+        '''
+        b = pred.shape[0]
+        pred = pred.view(b, -1)
+        target = target.view(b, -1)
+        intersection = pred * target
+        soft_dice = (2 * intersection.sum(1) + self.smooth) / (pred.sum(1) + target.sum(1) + self.smooth)
+        soft_dice = soft_dice.sum() / b
+        return 1 - soft_dice
+
+# ignore background
+class SoftMultiDiceLoss(nn.Module):
+    def __init__(self, smooth=1e-5, classes=3, ignore_classes_index=None):
+
+        super(SoftMultiDiceLoss, self).__init__()
         self.smooth = smooth
         self.classes = classes
+        self.ignore_classes_index = ignore_classes_index
+        self.bce_dice_loss = SoftBinaryDiceLoss()
 
     def forward(self, pred, target):
         '''
@@ -16,16 +38,16 @@ class SoftDiceLoss(nn.Module):
         :param target: original_seg_arr (b, 1, d, h, w), will be translate to one_hot for loss computing
         :return:
         '''
-        b =  pred.shape[0]
-        # do softmax here
-        pred = F.softmax(pred, dim=1)
-        pred = pred.view(b, -1)
-        ohe_target = self.create_one_hot(target, self.classes)
-        ohe_target = ohe_target.view(b, -1)
-        intersection = pred * ohe_target
-        soft_dice = (2 * intersection.sum(1) + self.smooth) / (pred.sum(1)+ ohe_target.sum(1) + self.smooth)
-        soft_dice = soft_dice.sum() / b
-        return 1 - soft_dice
+
+        pred = F.softmax(pred, dim=1)  # (b, c, d, h, w)
+        ohe_target = self.create_one_hot(target, self.classes) # (b, 1, d, h, w) => (b, c, d, h, w)
+
+        total_dice_loss = 0
+        for c in range(self.classes):
+            if c != self.ignore_classes_index:
+                total_dice_loss += self.bce_dice_loss(pred[:, c], ohe_target[:, c])
+        return total_dice_loss / (ohe_target.shape[1] - 1) if self.ignore_classes_index != None \
+            else total_dice_loss / ohe_target.shape[1]
 
     @staticmethod
     def create_one_hot(target, classes):
@@ -37,11 +59,11 @@ class SoftDiceLoss(nn.Module):
 
 
 class DC_and_CE_loss(nn.Module):
-    def __init__(self, smooth, classes, weight_ce=1, weight_dice=1):
+    def __init__(self, smooth, classes, weight_ce=1, weight_dice=1, ignore_classes_index=None):
         super(DC_and_CE_loss, self).__init__()
         self.weight_ce = weight_ce
         self.weight_dice = weight_dice
-        self.dc = SoftDiceLoss(smooth, classes)
+        self.dc = SoftMultiDiceLoss(smooth, classes, ignore_classes_index)
         self.ce = nn.CrossEntropyLoss()
 
     def forward(self, pred, target):
@@ -81,13 +103,6 @@ class MultipleOutputLoss2(nn.Module):
             if weights[i] != 0:
                 l += weights[i] * self.loss(x[i], y)
         return l
-
-
-
-
-
-
-
 
 
 if __name__ == '__main__':
