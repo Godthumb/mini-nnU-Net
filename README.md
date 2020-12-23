@@ -1,5 +1,5 @@
 # mini-nnU-Net
-try to implement nnU-Net with less automatic but more simple.
+Try to implement nnU-Net with less automatic but more simple.
 My aiming is to handle CT data in 3D network.so no more other modalities or 2D data will be supported.
 # preprocessing
 Different from array type data(like imagenet...), 3D medical CT data has special properties.Two important of them, is intensity and spacing.
