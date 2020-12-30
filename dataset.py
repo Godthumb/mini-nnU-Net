@@ -3,9 +3,10 @@ import numpy as np
 from file_and_folder_operations import subfiles, join
 import pickle
 import random
+from scipy import ndimage
 
 class COVID(Dataset):
-    def __init__(self, base_dir, patch_size, batch_size=2, mode='train', oversample_foreground_percent=0.33, aug_dict=None):
+    def __init__(self, base_dir, patch_size, batch_size=2, mode='train', oversample_foreground_percent=0.33, transform=None):
         super(COVID, self).__init__()
         assert mode == 'train' or mode == 'val'
         self.base_dir = join(base_dir, mode)
@@ -17,7 +18,7 @@ class COVID(Dataset):
         self.batch_size = batch_size
         self.oversample_foreground_percent = oversample_foreground_percent
         self.mode = mode
-        self.aug_dict = aug_dict
+        self.transform = transform
 
     def __getitem__(self, idx):
         this_case = self.resample_data_file_list[idx]
@@ -88,7 +89,7 @@ class COVID(Dataset):
                                 valid_bbox_x_lb:valid_bbox_x_ub])
 
         # pad valid voxel to patch size
-        patch_data = np.pad(case_all_data[:-1], ((0, 0),
+        patch_data_before = np.pad(case_all_data[:-1], ((0, 0),
                                     (-min(0, bbox_z_lb), max(bbox_z_ub - shape[0], 0)),
                                     (-min(0, bbox_y_lb), max(bbox_y_ub - shape[1], 0)),
                                     (-min(0, bbox_x_lb), max(bbox_x_ub - shape[2], 0))), mode='constant', constant_values=0)
@@ -98,32 +99,16 @@ class COVID(Dataset):
                                                  (-min(0, bbox_y_lb), max(bbox_y_ub - shape[1], 0)),
                                                  (-min(0, bbox_x_lb), max(bbox_x_ub - shape[2], 0))),
                            mode='constant', constant_values=0)
-        
+
+
+        sample = {'image': patch_data_before, 'label': patch_seg}
         # do_augmentation while training phase
-        # if self.mode == 'train':
-        #     patch_data, patch_seg = self.do_augment(patch_data, patch_seg, **self.aug_dict)
-        return {'image': patch_data, 'label': patch_seg}
-
-    def do_augment(self, patch_data, patch_seg, do_flip=True, do_swap=True, do_rot=True):
-        if do_flip:
-            flip_id = np.array([1, np.random.randint(2), np.random.randint(2)]) * 2 - 1 # [1, -1, -1]
-            patch_data = np.ascontiguousarray(patch_data[:, ::flip_id[0], ::flip_id[1], ::flip_id[2]])
-            patch_seg = np.ascontiguousarray(patch_seg[:, ::flip_id[0], ::flip_id[1], ::flip_id[2]])
-
-        if do_swap:
-            if patch_data.shape[1] == patch_data.shape[3] and patch_data.shape[1] == patch_data.shape[2]:
-                axisorder = np.random.permutation(3) # [1, 0, 2]
-                patch_data = np.transpose(patch_data, np.concatenate([[0], axisorder + 1]))
-                patch_seg = np.transpose(patch_seg, np.concatenate([[0], axisorder + 1]))
-        if do_rot:
-            k = np.random.randint(0, 4)
-            patch_data = np.rot90(patch_data, k, axes=(1, 2))
-            patch_seg = np.rot90(patch_seg, k, axes=(1, 2))
-
-        return patch_data, patch_seg
+        if self.mode == 'train' and self.transform is not None:
+            sample = self.transform(sample)
+        return sample
 
     def get_do_oversample(self, idx):  # 0.67
-        # 2 * (1- 0.33) = round(2 * 0.67) = 1
+        # 4 * (1- 0.33) = round(4 * 0.67) = 3
         return idx < round(self.batch_size * (1 - self.oversample_foreground_percent))
 
     def get_case_identifier(self, case):
@@ -143,26 +128,104 @@ class COVID(Dataset):
     def __len__(self):
         return len(self.resample_data_file_list)
 
+class GaussianNoiseTransform(object):
+    def __init__(self, p=0.1, noise_variance=(0, 0.1)):
+        self.p = p
+        self.noise_variance = noise_variance
+
+    def __call__(self, sample):
+        image, seg = sample['image'], sample['label']
+        if np.random.uniform() < self.p:
+            if self.noise_variance[0] == self.noise_variance[1]:
+                variance = self.noise_variance[0]
+            else:
+                variance = random.uniform(self.noise_variance[0], self.noise_variance[1]) # (0, 0.1)
+            image = image + np.random.normal(0.0, variance, size=image.shape)
+            image = image.astype(np.float32)
+        return {'image': image, 'label': seg}
+
+
+class GaussianBlurTransform(object):
+    def __init__(self, p=0.2, sigma_range=(0.5, 1)):
+        self.p = p
+        self.sigma = np.random.uniform(sigma_range[0], sigma_range[1])
+
+    def __call__(self, sample):
+        image, seg = sample['image'], sample['label']
+        if np.random.uniform() < self.p:
+            image = ndimage.gaussian_filter(image, self.sigma, order=0)
+
+        return {'image': image, 'label': seg}
+
+
+class GammaTransform(object):
+    def __init__(self, p=0.3, gamma_range=(0.7, 1.5)):
+        self.p = p
+        self.gamma_range = gamma_range
+
+    def __call__(self, sample):
+        image, seg = sample['image'], sample['label']
+        if np.random.uniform() < self.p:
+            mn = image.mean()
+            sd = image.std()
+            if np.random.random() < 0.5 and self.gamma_range[0] < 1:
+                gamma = np.random.uniform(self.gamma_range[0], 1)  # [0.7 ,1]
+            else:
+                gamma = np.random.uniform(max(self.gamma_range[0], 1), self.gamma_range[1])  # [1, 1.5]
+
+            # (x - x.min()) / (x.max() - x.min()) => (0, 1)
+            minm = image.min()
+            rnge = image.max() - minm
+            # gamma transform & transform back use minm, rnge
+            image = np.power(((image - minm) / float(rnge + 1e-7)), gamma) * rnge + minm
+            image = image - image.mean() + mn
+            image = image / (image.std() + 1e-8) * sd
+
+        return {'image': image, 'label': seg}
+
+
+class RotationTransform(object):
+    def __init__(self, p=0.2, rotate_range=(-30, 30)):
+        self.p = p
+        self.angle = random.randint(rotate_range[0], rotate_range[1])
+
+    def __call__(self, sample):
+        image, seg = sample['image'], sample['label']
+        if np.random.uniform() < self.p:
+            image = ndimage.rotate(image, self.angle, (2, 3), reshape=False, cval=0)
+            seg = np.round(ndimage.rotate(seg, self.angle, (2, 3), reshape=False, cval=0))
+        return {'image': image, 'label': seg}
+
+
+class FlipTransform(object):
+    def __call__(self, sample):
+        image, seg = sample['image'], sample['label']
+        flip_id = np.array([1, np.random.randint(2), np.random.randint(2)]) * 2 - 1  # [1, -1, -1]
+        image = np.ascontiguousarray(image[:, ::flip_id[0], ::flip_id[1], ::flip_id[2]])
+        seg = np.ascontiguousarray(seg[:, ::flip_id[0], ::flip_id[1], ::flip_id[2]])
+        return {'image': image, 'label': seg}
+
 
 
 
 if __name__ == '__main__':
     import SimpleITK as sitk
     from file_and_folder_operations import *
+    import torchvision.transforms as transforms
     data = load_pickle(r'./preprocessed/foreground/dataset_properties.pkl')['target_spacing']
     print(data)
-    dataset = COVID(r'./preprocessed', (64, 128, 128), 'train', {'do_flip': True, 'do_swap': False})
-    preprocess_dict = dataset.__getitem__(1)
-    img, seg = preprocess_dict['image'], preprocess_dict['label']
-    print(img.shape)
-    print(seg.shape)
-    print(np.unique(img))
-    print(np.unique(seg))
-    # img, seg = dataset.do_augment(img, seg, {'do_flip': True, 'do_swap': False})
-    img = sitk.GetImageFromArray(img[0])
-    img.SetSpacing(np.array(data)[::-1])
+    transforms_ = transforms.Compose([FlipTransform(), RotationTransform(1),
+                                      GaussianNoiseTransform(1), GaussianBlurTransform(1), GammaTransform(1)])
+    dataset = COVID(r'./preprocessed', (64, 128, 128), 2, 'train', 0.33, transform=transforms_)
+    preprocess_dict = dataset.__getitem__(0)
+    aug_img, seg = preprocess_dict['image'], preprocess_dict['label']
+    print(aug_img.dtype)
+    print(seg.dtype)
+    aug_img = sitk.GetImageFromArray(aug_img[0])
+    aug_img.SetSpacing(np.array(data)[::-1])
     seg = sitk.GetImageFromArray(seg[0])
     seg.SetSpacing(np.array(data)[::-1])
-    sitk.WriteImage(img, './aug_img.nii.gz')
+    sitk.WriteImage(aug_img, './aug_img.nii.gz')
     sitk.WriteImage(seg, './aug_seg.nii.gz')
+
 
